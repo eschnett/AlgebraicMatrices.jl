@@ -5,327 +5,306 @@ using Random
 
 ################################################################################
 
-# - remove WrappedVector
-# - allow AbstractVector everywhere
 # - add tensor product
 # - add matrix inverses
 # - add tensor decompositions (LU, QR)
-# - remove abstract types
 # - provide "shell" type (where all operations are provided by functions)
 
 ################################################################################
 
-export AlgebraicVector
-abstract type AlgebraicVector{T} <: AbstractVector{T} end
-Base.eltype(x::AlgebraicVector{T}) where {T} = T
-function Base.convert(::Type{Vector}, x::AlgebraicVector{T}) where {T}
-    return convert(Vector{T}, x)
-end
-function Base.zero(::Type{<:AlgebraicVector{T}}, size::Int) where {T}
-    return ZeroVector{T}(size)
-end
-Base.:+(x::AlgebraicVector) = ScaledVector(+one(eltype(x)), x)
-Base.:-(x::AlgebraicVector) = ScaledVector(-one(eltype(x)), x)
-Base.:+(x::AlgebraicVector, y::AlgebraicVector) = SumVector(x, y)
-Base.:-(x::AlgebraicVector, y::AlgebraicVector) = x + (-y)
-Base.:*(a::Number, x::AlgebraicVector) = ScaledVector(a, x)
-Base.:*(x::AlgebraicVector, a::Number) = a * x
-Base.:\(a::Number, x::AlgebraicVector) = inv(a) * x
-Base.:/(x::AlgebraicVector, a::Number) = x * inv(a)
+export AlgebraicArray
+abstract type AlgebraicArray{T,D} <: AbstractArray{T,D} end
 
-export avrand
-function avrand(rng::AbstractRNG, ::Type{AlgebraicVector{T}},
-                size::Int) where {T}
-    types = [WrappedVector, ZeroVector, ScaledVector, SumVector]
-    return avrand(rng, rand(types){T}, size)
-end
-function avrand(T::Type{<:AlgebraicVector}, size::Int)
-    return avrand(Random.GLOBAL_RNG, T, size)
-end
+const AlgebraicVector{T} = AlgebraicArray{T,1}
+const AlgebraicMatrix{T} = AlgebraicArray{T,2}
 
-function Base.:(==)(x::AlgebraicVector, y::AlgebraicVector)
-    size(x) ≠ size(y) && return false
-    return evaluate(x) == evaluate(y)
-end
-function Base.:(<)(x::AlgebraicVector, y::AlgebraicVector)
-    return evaluate(x) < evaluate(y)
-end
+################################################################################
 
-export WrappedVector
-struct WrappedVector{T} <: AlgebraicVector{T}
-    x::AbstractVector{T}
-    WrappedVector{T}(x::AbstractVector{T}) where {T} = new{T}(x)
-    WrappedVector(x::AbstractVector{T}) where {T} = new{T}(x)
-end
-Base.size(x::WrappedVector) = size(x.x)
-function Base.convert(::Type{<:Vector{T}}, x::WrappedVector{T}) where {T}
-    return convert(Vector{T}, x.x)::Vector{T}
-end
-export evaluate
-evaluate(x::WrappedVector{T}) where {T} = x.x::AbstractVector{T}
-function avrand(rng::AbstractRNG, ::Type{WrappedVector{T}}, size::Int) where {T}
-    return WrappedVector{T}(rand(T, size))
-end
-
-export ZeroVector
-struct ZeroVector{T} <: AlgebraicVector{T}
-    size::Int
-end
-Base.size(x::ZeroVector) = (x.size,)
-Base.convert(::Type{<:Vector{T}}, x::ZeroVector{T}) where {T} = zeros(T, x.size)
-evaluate(x::ZeroVector{T}) where {T} = zeros(T, x.size)::AbstractVector{T}
-function avrand(rng::AbstractRNG, ::Type{ZeroVector{T}}, size::Int) where {T}
-    return ZeroVector{T}(size)
-end
-
-export ScaledVector
-struct ScaledVector{T} <: AlgebraicVector{T}
-    a::Number
-    x::AlgebraicVector
-    function ScaledVector{T}(a::Number, x::AlgebraicVector) where {T}
-        R = typeof(one(typeof(a)) * zero(eltype(x)))
-        @assert R <: T
-        return new{T}(a, x)
+@inline function sizes2tuple(::Val{D}, sizes...) where {D}
+    if length(sizes) == 1
+        # if `sizes` is a single argument, it can either be an integer
+        # or a collection
+        sizes = sizes[1]
+        if sizes isa Integer
+            sizes = (sizes,)
+        end
     end
-    function ScaledVector(a::Number, x::AlgebraicVector)
-        R = typeof(one(typeof(a)) * zero(eltype(x)))
-        return new{R}(a, x)
-    end
-end
-Base.size(x::ScaledVector) = size(x.x)
-function Base.convert(::Type{<:Vector{T}}, x::ScaledVector{T}) where {T}
-    return (x.a * convert(Vector{T}, x.x))::Vector{T}
-end
-function evaluate(x::ScaledVector{T}) where {T}
-    return (x.a * evaluate(x.x))::AbstractVector{T}
-end
-function avrand(rng::AbstractRNG, ::Type{ScaledVector{T}}, size::Int) where {T}
-    a = rand(rng, T)
-    x = avrand(rng, AlgebraicVector{T}, size)
-    return ScaledVector{T}(a, x)
-end
-
-export SumVector
-struct SumVector{T} <: AlgebraicVector{T}
-    x::AlgebraicVector
-    y::AlgebraicVector
-    function SumVector{T}(x::AlgebraicVector, y::AlgebraicVector) where {T}
-        R = typeof(zero(eltype(x)) + zero(eltype(y)))
-        @assert R <: T
-        @assert size(x) == size(y)
-        return new{T}(x, y)
-    end
-    function SumVector(x::AlgebraicVector, y::AlgebraicVector)
-        R = typeof(zero(eltype(x)) + zero(eltype(y)))
-        @assert size(x) == size(y)
-        return new{R}(x, y)
-    end
-end
-Base.size(x::SumVector) = size(x.x)
-function Base.convert(::Type{<:Vector{T}}, x::SumVector{T}) where {T}
-    return (convert(Vector{T}, x.x) + convert(Vector{T}, x.y))::Vector{T}
-end
-function evaluate(x::SumVector{T}) where {T}
-    return (evaluate(x.x) + evaluate(x.y))::AbstractVector{T}
-end
-function avrand(rng::AbstractRNG, ::Type{SumVector{T}}, size::Int) where {T}
-    x = avrand(rng, AlgebraicVector{T}, size)
-    y = avrand(rng, AlgebraicVector{T}, size)
-    return SumVector{T}(x, y)
+    length(sizes) == D || error("ndims mismatch")
+    sizes = ntuple(d -> Int(sizes[d]), D)
+    return sizes::NTuple{D,Int}
 end
 
 ################################################################################
 
-export AlgebraicMatrix
-abstract type AlgebraicMatrix{T} <: AbstractMatrix{T} end
-Base.eltype(x::AlgebraicMatrix{T}) where {T} = T
-function Base.convert(::Type{Matrix}, x::AlgebraicMatrix{T}) where {T}
-    return convert(Matrix{T}, x)::Matrix{T}
-end
-function Base.zero(::Type{<:AlgebraicMatrix{T}}, size1::Int,
-                   size2::Int) where {T}
-    return ZeroMatrix{T}(size1, size2)
-end
-function Base.one(::Type{<:AlgebraicMatrix{T}}, size::Int) where {T}
-    return OneMatrix{T}(size)
-end
-Base.:+(x::AlgebraicMatrix) = ScaledMatrix(+one(eltype(x)), x)
-Base.:-(x::AlgebraicMatrix) = ScaledMatrix(-one(eltype(x)), x)
-Base.:+(x::AlgebraicMatrix, y::AlgebraicMatrix) = SumMatrix(x, y)
-Base.:-(x::AlgebraicMatrix, y::AlgebraicMatrix) = x + (-y)
-Base.:*(a::Number, x::AlgebraicMatrix) = ScaledMatrix(a, x)
-Base.:*(x::AlgebraicMatrix, a::Number) = a * x
-Base.:\(a::Number, x::AlgebraicMatrix) = inv(a) * x
-Base.:/(x::AlgebraicMatrix, a::Number) = x * inv(a)
-Base.:*(x::AlgebraicMatrix, y::AlgebraicMatrix) = ProductMatrix(x, y)
-Base.:*(x::AlgebraicMatrix, y::AlgebraicVector) = ProductVector(x, y)
+Base.eltype(x::AlgebraicArray{T}) where {T} = T
 
-function avrand(rng::AbstractRNG, ::Type{AlgebraicMatrix{T}}, size1::Int,
-                size2::Int) where {T}
-    types = [WrappedMatrix, ZeroMatrix, ScaledMatrix, SumMatrix]
-    return avrand(rng, rand(types){T}, size1, size2)
+function Base.zero(::Type{<:AlgebraicArray{T,D}}, sizes...) where {T,D}
+    return ZeroArray{T,D}(sizes2tuple(Val(D), sizes...))
 end
-function avrand(T::Type{<:AlgebraicMatrix}, size1::Int, size2::Int)
-    return avrand(Random.GLOBAL_RNG, T, size1, size2)
+Base.:+(x::AlgebraicArray) = ScaledArray(+one(eltype(x)), x)
+Base.:-(x::AlgebraicArray) = ScaledArray(-one(eltype(x)), x)
+Base.:+(x::AlgebraicArray, y::AlgebraicArray) = SumArray(x, y)
+Base.:+(x::AlgebraicArray, y::AbstractArray) = SumArray(x, y)
+Base.:+(x::AbstractArray, y::AlgebraicArray) = SumArray(x, y)
+Base.:-(x::AlgebraicArray, y::AlgebraicArray) = x + (-y)
+Base.:-(x::AlgebraicArray, y::AbstractArray) = x + (-y)
+Base.:-(x::AbstractArray, y::AlgebraicArray) = x + (-y)
+Base.:*(a::Number, x::AlgebraicArray) = ScaledArray(a, x)
+Base.:*(x::AlgebraicArray, a::Number) = a * x
+Base.:\(a::Number, x::AlgebraicArray) = inv(a) * x
+Base.:/(x::AlgebraicArray, a::Number) = x * inv(a)
+
+function Base.one(::Type{<:AlgebraicArray{T,2}}, sizes...) where {T}
+    sizes = sizes2tuple(Val(2), sizes...)
+    sizes[1] == sizes[2] || error("size error")
+    return OneArray{T}(sizes[1])
+end
+Base.:*(x::AlgebraicArray, y::AlgebraicArray) = ProductArray(x, y)
+Base.:*(x::AlgebraicArray, y::AbstractArray) = ProductArray(x, y)
+Base.:*(x::AbstractArray, y::AlgebraicArray) = ProductArray(x, y)
+function Base.:*(x::AlgebraicArray{T,1} where {T},
+                 y::AlgebraicArray{T,2} where {T})
+    return ProductArray(x, y)
+end
+function Base.:*(x::AlgebraicArray{T,2} where {T},
+                 y::AlgebraicArray{T,1} where {T})
+    return ProductArray(x, y)
+end
+function Base.:*(x::AbstractArray{T,1} where {T},
+                 y::AlgebraicArray{T,2} where {T})
+    return ProductArray(x, y)
 end
 
-function Base.:(==)(x::AlgebraicMatrix, y::AlgebraicMatrix)
+################################################################################
+
+export arand
+function arand(rng::AbstractRNG, ::Type{AlgebraicArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
+    if maxdepth ≡ nothing
+        maxdepth = 4
+    end
+    types = [WrappedArray{T,D}, ZeroArray{T,D}]
+    if D == 2
+        sz = sizes2tuple(Val(2), sizes...)
+        if sz[1] == sz[2]
+            push!(types, OneArray{T})
+        end
+    end
+    if maxdepth > 0
+        append!(types, [ScaledArray{T,D}, SumArray{T,D}, ProductArray{T,D}])
+    end
+    return arand(rng, rand(types), sizes...; maxdepth=maxdepth - 1)
+end
+function arand(T::Type, sizes...; maxdepth=nothing)
+    return arand(Random.GLOBAL_RNG, T, sizes...; maxdepth=maxdepth)
+end
+
+################################################################################
+
+function Base.:(==)(x::AlgebraicArray, y::AlgebraicArray)
+    x ≡ y && return true
     size(x) ≠ size(y) && return false
-    return evaluate(x) == evaluate(y)
+    @inbounds for i in eachindex(x)
+        x[i] ≠ y[i] && return false
+    end
+    return true
 end
-function Base.:(<)(x::AlgebraicMatrix, y::AlgebraicMatrix)
-    return evaluate(x) < evaluate(y)
-end
-
-export WrappedMatrix
-struct WrappedMatrix{T} <: AlgebraicMatrix{T}
-    x::AbstractMatrix{T}
-    WrappedMatrix{T}(x::AbstractMatrix{T}) where {T} = new{T}(x)
-    WrappedMatrix(x::AbstractMatrix{T}) where {T} = new{T}(x)
-end
-Base.size(x::WrappedMatrix) = size(x.x)
-function Base.convert(::Type{<:Matrix{T}}, x::WrappedMatrix{T}) where {T}
-    return convert(Matrix{T}, x.x)::Matrix{T}
-end
-evaluate(x::WrappedMatrix{T}) where {T} = x.x::AbstractMatrix{T}
-function avrand(rng::AbstractRNG, ::Type{WrappedMatrix{T}}, size1::Int,
-                size2::Int) where {T}
-    return WrappedMatrix{T}(rand(T, size1, size2))
+function Base.:(<)(x::AlgebraicVector, y::AlgebraicVector)
+    x ≡ y && return false
+    lx = length(x)
+    ly = length(y)
+    @inbounds for i in 1:min(lx, ly)
+        c = cmp(x[i], y[i])
+        c ≠ 0 && return c < 0
+    end
+    return lx < ly
 end
 
-export ZeroMatrix
-struct ZeroMatrix{T} <: AlgebraicMatrix{T}
-    size1::Int
-    size2::Int
+################################################################################
+
+export evaluate
+evaluate(x::AbstractArray) = x
+function arand(rng::AbstractRNG, ::Type{Array{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D} end
+
+################################################################################
+
+export WrappedArray
+struct WrappedArray{T,D} <: AlgebraicArray{T,D}
+    x::AbstractArray{T,D}
 end
-Base.size(x::ZeroMatrix) = (x.size1, x.size2)
-function Base.convert(::Type{<:Matrix{T}}, x::ZeroMatrix{T}) where {T}
-    return zeros(T, x.size1, x.size2)
-end
-function evaluate(x::ZeroMatrix{T}) where {T}
-    return zeros(T, x.size1, x.size2)::AbstractMatrix{T}
-end
-function avrand(rng::AbstractRNG, ::Type{ZeroMatrix{T}}, size1::Int,
-                size2::Int) where {T}
-    return ZeroMatrix{T}(size1, size2)
+Base.getindex(x::WrappedArray, inds...) = x.x[inds...]
+Base.size(x::WrappedArray) = size(x.x)
+evaluate(x::WrappedArray) = x.x
+function arand(rng::AbstractRNG, ::Type{WrappedArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
+    sz = sizes2tuple(Val(D), sizes...)
+    if D == 0
+        return WrappedArray{T,D}(fill(rand(T), sz))
+    end
+    return WrappedArray{T,D}(rand(T, sz...))
 end
 
-export OneMatrix
-struct OneMatrix{T} <: AlgebraicMatrix{T}
+################################################################################
+
+export ZeroArray
+struct ZeroArray{T,D} <: AlgebraicArray{T,D}
+    sizes::NTuple{D,Int}
+end
+Base.getindex(x::ZeroArray, inds...) = zero(eltype(x))
+Base.size(x::ZeroArray) = x.sizes
+evaluate(x::ZeroArray{T,D}) where {T,D} = zeros(T, x.sizes)::AbstractArray{T,D}
+function arand(rng::AbstractRNG, ::Type{ZeroArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
+    return ZeroArray{T,D}(sizes2tuple(Val(D), sizes...))
+end
+
+################################################################################
+
+export OneArray
+struct OneArray{T} <: AlgebraicArray{T,2}
     size::Int
 end
-Base.size(x::OneMatrix) = (x.size, x.size)
-function Base.convert(::Type{<:Matrix{T}}, x::OneMatrix{T}) where {T}
-    return diagm(ones(T, x.size))::Matrix{T}
+function Base.getindex(x::OneArray, inds...)
+    inds = sizes2tuple(Val(2), inds...)
+    return inds[1] == inds[2] ? one(eltype(x)) : zero(eltype(x))
 end
-function evaluate(x::OneMatrix{T}) where {T}
-    return Diagonal(ones(T, x.size))::AbstractMatrix{T}
+Base.size(x::OneArray) = (x.size, x.size)
+evaluate(x::OneArray{T}) where {T} = Diagonal{T}(ones(T, x.size))
+function arand(rng::AbstractRNG, ::Type{OneArray{T}}, sizes...;
+               maxdepth=nothing) where {T}
+    sizes = sizes2tuple(Val(2), sizes...)
+    sizes[1] == sizes[2] || error("size error")
+    return OneArray{T}(sizes[1])
 end
 
-export ScaledMatrix
-struct ScaledMatrix{T} <: AlgebraicMatrix{T}
+################################################################################
+
+export ScaledArray
+struct ScaledArray{T,D} <: AlgebraicArray{T,D}
     a::Number
-    x::AlgebraicMatrix
-    function ScaledMatrix{T}(a::Number, x::AlgebraicMatrix) where {T}
+    x::AbstractArray{U,D} where {U}
+    function ScaledArray{T,D}(a::Number,
+                              x::AbstractArray{U,D} where {U}) where {T,D}
         R = typeof(one(typeof(a)) * zero(eltype(x)))
-        @assert R <: T
-        return new{T}(a, x)
+        R <: T || error("type mismatch")
+        return new{T,D}(a, x)
     end
-    function ScaledMatrix(a::Number, x::AlgebraicMatrix)
-        R = typeof(one(typeof(a)) * zero(eltype(x)))
-        return new{R}(a, x)
+    function ScaledArray{T}(a::Number,
+                            x::AbstractArray{U,D} where {U}) where {T,D}
+        return ScaledArray{T,D}(a, x)
+    end
+    function ScaledArray(a::Number, x::AbstractArray{U,D} where {U}) where {D}
+        T = typeof(one(typeof(a)) * zero(eltype(x)))
+        return ScaledArray{T,D}(a, x)
     end
 end
-Base.size(x::ScaledMatrix) = size(x.x)
-function Base.convert(::Type{<:Matrix{T}}, x::ScaledMatrix{T}) where {T}
-    return (x.a * convert(Matrix{T}, x.x))::Matrix{T}
+Base.getindex(x::ScaledArray, inds...) = x.a * x.x[inds...]
+Base.size(x::ScaledArray) = size(x.x)
+function evaluate(x::ScaledArray{T,D}) where {T,D}
+    return (x.a * evaluate(x.x))::AbstractArray{T,D}
 end
-function evaluate(x::ScaledMatrix{T}) where {T}
-    return (x.a * evaluate(x.x))::AbstractMatrix{T}
-end
-function avrand(rng::AbstractRNG, ::Type{ScaledMatrix{T}}, size1::Int,
-                size2::Int) where {T}
+function arand(rng::AbstractRNG, ::Type{ScaledArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
     a = rand(rng, T)
-    x = avrand(rng, AlgebraicMatrix{T}, size1, size2)
-    return ScaledMatrix{T}(a, x)
+    x = arand(rng, AlgebraicArray{T,D}, sizes...; maxdepth=maxdepth)
+    return ScaledArray{T,D}(a, x)
 end
 
-export SumMatrix
-struct SumMatrix{T} <: AlgebraicMatrix{T}
-    x::AlgebraicMatrix
-    y::AlgebraicMatrix
-    function SumMatrix{T}(x::AlgebraicMatrix, y::AlgebraicMatrix) where {T}
+################################################################################
+
+export SumArray
+struct SumArray{T,D} <: AlgebraicArray{T,D}
+    x::AbstractArray{U,D} where {U}
+    y::AbstractArray{U,D} where {U}
+    function SumArray{T,D}(x::AbstractArray{U,D} where {U},
+                           y::AbstractArray{V,D} where {V}) where {T,D}
         R = typeof(zero(eltype(x)) + zero(eltype(y)))
-        @assert R <: T
-        @assert size(x) == size(y)
-        return new{T}(x, y)
+        R <: T || error("type mismatch")
+        size(x) == size(y) || error("size mismatch")
+        return new{T,D}(x, y)
     end
-    function SumMatrix(x::AlgebraicMatrix, y::AlgebraicMatrix)
+    function SumArray{T}(x::AbstractArray{U,D} where {U},
+                         y::AbstractArray{V,D} where {V}) where {T,D}
+        return SumArray{T,D}(x, y)
+    end
+    function SumArray(x::AbstractArray{U,D} where {U},
+                      y::AbstractArray{V,D} where {V}) where {D}
+        T = typeof(zero(eltype(x)) + zero(eltype(y)))
+        return SumArray{T,D}(x, y)
+    end
+end
+Base.getindex(x::SumArray, inds...) = x.x[inds...] + x.y[inds...]
+Base.size(x::SumArray) = size(x.x)
+function evaluate(x::SumArray{T,D}) where {T,D}
+    return (evaluate(x.x) + evaluate(x.y))::AbstractArray{T,D}
+end
+function arand(rng::AbstractRNG, ::Type{SumArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
+    sz = sizes2tuple(Val(D), sizes...)
+    x = arand(rng, AlgebraicArray{T,D}, sz; maxdepth=maxdepth)
+    y = arand(rng, AlgebraicArray{T,D}, sz; maxdepth=maxdepth)
+    return SumArray{T,D}(x, y)
+end
+
+################################################################################
+
+export ProductArray
+struct ProductArray{T,D} <: AlgebraicArray{T,D}
+    x::AbstractArray{U,D} where {U,D}
+    y::AbstractArray{U,D} where {U,D}
+    function ProductArray{T,D}(x::AbstractArray, y::AbstractArray) where {T,D}
         R = typeof(zero(eltype(x)) + zero(eltype(y)))
-        @assert size(x) == size(y)
-        return new{R}(x, y)
+        R <: T || error("type mismatch")
+        (ndims(x) ≥ 1 && ndims(y) ≥ 1) || error("ndims error")
+        ndims(x) + ndims(y) == D + 2 || error("ndims mismatch")
+        size(x, ndims(x)) == size(y, 1) || error("dimension mismatch")
+        return new{T,D}(x, y)
+    end
+    function ProductArray{T}(x::AbstractArray, y::AbstractArray) where {T}
+        D = ndims(x) + ndims(y) - 2
+        return ProductArray{T,D}(x, y)
+    end
+    function ProductArray(x::AbstractArray, y::AbstractArray)
+        T = typeof(one(eltype(x)) * one(eltype(y)))
+        return ProductArray{T}(x, y)
     end
 end
-Base.size(x::SumMatrix) = size(x.x)
-function Base.convert(::Type{<:Matrix{T}}, x::SumMatrix{T}) where {T}
-    return convert(Matrix{T}, x.x) + convert(Matrix{T}, x.y)::Matrix{T}
+function Base.getindex(x::ProductArray{T,D}, inds...) where {T,D}
+    inds = sizes2tuple(Val(D), inds...)
+    @assert length(inds) == D
+    nd1 = ndims(x.x)
+    nd2 = ndims(x.y)
+    inds1 = inds[1:(nd1 - 1)]
+    inds2 = inds[nd1:D]
+    sz′ = size(x.y, 1)
+    sz′ == 0 && return zero(T)
+    x′ = @view x.x[inds1..., :]
+    y′ = @view x.y[:, inds2...]
+    return dot(x′, y′)
 end
-function evaluate(x::SumMatrix{T}) where {T}
-    return (evaluate(x.x) + evaluate(x.y))::AbstractMatrix{T}
+Base.size(x::ProductArray) = (size(x.x)[1:(end - 1)]..., size(x.y)[2:end]...)
+function evaluate(x::ProductArray{T,D}) where {T,D}
+    sx = size(x.x)
+    sy = size(x.y)
+    sx′ = (prod(sx[1:(end - 1)]), sx[end])
+    sy′ = (sy[1], prod(sy[2:end]))
+    return reshape(reshape(evaluate(x.x), sx′) * reshape(evaluate(x.y), sy′),
+                   size(x))::AbstractArray{T,D}
 end
-function avrand(rng::AbstractRNG, ::Type{SumMatrix{T}}, size1::Int,
-                size2::Int) where {T}
-    x = avrand(rng, AlgebraicMatrix{T}, size1, size2)
-    y = avrand(rng, AlgebraicMatrix{T}, size1, size2)
-    return SumMatrix{T}(x, y)
-end
-
-export ProductMatrix
-struct ProductMatrix{T} <: AlgebraicMatrix{T}
-    x::AlgebraicMatrix
-    y::AlgebraicMatrix
-    function ProductMatrix{T}(x::AlgebraicMatrix, y::AlgebraicMatrix) where {T}
-        R = typeof(one(eltype(x)) * one(eltype(y)))
-        @assert R <: T
-        @assert size(x, 2) == size(y, 1)
-        return new{T}(x, y)
-    end
-    function ProductMatrix(x::AlgebraicMatrix, y::AlgebraicMatrix)
-        R = typeof(one(eltype(x)) * one(eltype(y)))
-        @assert size(x, 2) == size(y, 1)
-        return new{R}(x, y)
-    end
-end
-Base.size(x::ProductMatrix) = (size(x.x, 1), size(x.y, 2))
-function Base.convert(::Type{<:Matrix{T}}, x::ProductMatrix{T}) where {T}
-    return convert(Matrix{T}, x.x) * convert(Matrix{T}, x.y)::Matrix{T}
-end
-function evaluate(x::ProductMatrix{T}) where {T}
-    return (evaluate(x.x) * evaluate(x.y))::AbstractMatrix{T}
-end
-
-export ProductVector
-struct ProductVector{T} <: AlgebraicVector{T}
-    x::AlgebraicMatrix
-    y::AlgebraicVector
-    function ProductVector{T}(x::AlgebraicMatrix, y::AlgebraicVector) where {T}
-        R = typeof(one(eltype(x)) * one(eltype(y)))
-        @assert R <: T
-        @assert size(x, 2) == size(y, 1)
-        return new{T}(x, y)
-    end
-    function ProductVector(x::AlgebraicMatrix, y::AlgebraicVector)
-        R = typeof(one(eltype(x)) * one(eltype(y)))
-        @assert size(x, 2) == size(y, 1)
-        return new{R}(x, y)
-    end
-end
-Base.size(x::ProductVector) = (size(x.x, 1),)
-function Base.convert(::Type{<:Vector{T}}, x::ProductVector{T}) where {T}
-    return convert(Matrix{T}, x.x) * convert(Vector{T}, x.y)::Vector{T}
-end
-function evaluate(x::ProductVector{T}) where {T}
-    return (evaluate(x.x) * evaluate(x.y))::AbstractVector{T}
+function arand(rng::AbstractRNG, ::Type{ProductArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
+    sz = sizes2tuple(Val(D), sizes...)
+    nd1 = rand(1:(D + 1))
+    nd2 = D + 2 - nd1
+    @assert nd1 ≥ 1 && nd2 ≥ 1 && nd1 + nd2 == D + 2
+    sz′ = rand(0:((sz === () ? 0 : maximum(sz)) + 2))
+    sz1 = (sz[1:(nd1 - 1)]..., sz′)
+    sz2 = (sz′, sz[nd1:(nd1 + nd2 - 2)]...)
+    @assert length(sz1) == nd1 && length(sz2) == nd2
+    x = arand(rng, AlgebraicArray{T,nd1}, sz1; maxdepth=maxdepth)
+    y = arand(rng, AlgebraicArray{T,nd2}, sz2; maxdepth=maxdepth)
+    return ProductArray{T,D}(x, y)
 end
 
 end
