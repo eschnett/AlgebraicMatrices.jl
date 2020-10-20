@@ -91,7 +91,9 @@ function arand(rng::AbstractRNG, ::Type{AlgebraicArray{T,D}}, sizes...;
         end
     end
     if maxdepth > 0
-        append!(types, [ScaledArray{T,D}, SumArray{T,D}, ProductArray{T,D}])
+        append!(types,
+                [ScaledArray{T,D}, SumArray{T,D}, ProductArray{T,D},
+                 TensorProductArray{T,D}])
     end
     return arand(rng, rand(types), sizes...; maxdepth=maxdepth - 1)
 end
@@ -254,7 +256,7 @@ struct ProductArray{T,D} <: AlgebraicArray{T,D}
     x::AbstractArray{U,D} where {U,D}
     y::AbstractArray{U,D} where {U,D}
     function ProductArray{T,D}(x::AbstractArray, y::AbstractArray) where {T,D}
-        R = typeof(zero(eltype(x)) + zero(eltype(y)))
+        R = typeof(one(eltype(x)) * one(eltype(y)))
         R <: T || error("type mismatch")
         (ndims(x) ≥ 1 && ndims(y) ≥ 1) || error("ndims error")
         ndims(x) + ndims(y) == D + 2 || error("ndims mismatch")
@@ -272,7 +274,6 @@ struct ProductArray{T,D} <: AlgebraicArray{T,D}
 end
 function Base.getindex(x::ProductArray{T,D}, inds...) where {T,D}
     inds = sizes2tuple(Val(D), inds...)
-    @assert length(inds) == D
     nd1 = ndims(x.x)
     nd2 = ndims(x.y)
     inds1 = inds[1:(nd1 - 1)]
@@ -305,6 +306,55 @@ function arand(rng::AbstractRNG, ::Type{ProductArray{T,D}}, sizes...;
     x = arand(rng, AlgebraicArray{T,nd1}, sz1; maxdepth=maxdepth)
     y = arand(rng, AlgebraicArray{T,nd2}, sz2; maxdepth=maxdepth)
     return ProductArray{T,D}(x, y)
+end
+
+################################################################################
+
+export TensorProductArray
+struct TensorProductArray{T,D} <: AlgebraicArray{T,D}
+    x::AbstractArray{U,D} where {U,D}
+    y::AbstractArray{U,D} where {U,D}
+    function TensorProductArray{T,D}(x::AbstractArray,
+                                     y::AbstractArray) where {T,D}
+        R = typeof(one(eltype(x)) * one(eltype(y)))
+        R <: T || error("type mismatch")
+        ndims(x) + ndims(y) == D || error("ndims mismatch")
+        return new{T,D}(x, y)
+    end
+    function TensorProductArray{T}(x::AbstractArray, y::AbstractArray) where {T}
+        D = ndims(x) + ndims(y)
+        return TensorProductArray{T,D}(x, y)
+    end
+    function TensorProductArray(x::AbstractArray, y::AbstractArray)
+        T = typeof(one(eltype(x)) * one(eltype(y)))
+        return TensorProductArray{T}(x, y)
+    end
+end
+function Base.getindex(x::TensorProductArray{T,D}, inds...) where {T,D}
+    inds = sizes2tuple(Val(D), inds...)
+    nd1 = ndims(x.x)
+    nd2 = ndims(x.y)
+    inds1 = inds[1:nd1]
+    inds2 = inds[(nd1 + 1):D]
+    return x.x[inds1...] * x.y[inds2...]
+end
+Base.size(x::TensorProductArray) = (size(x.x)..., size(x.y)...)
+function evaluate(x::TensorProductArray{T,D}) where {T,D}
+    return reshape(vec(evaluate(x.x)) * transpose(vec(evaluate(x.y))),
+                   size(x))::AbstractArray{T,D}
+end
+function arand(rng::AbstractRNG, ::Type{TensorProductArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
+    sz = sizes2tuple(Val(D), sizes...)
+    nd1 = rand(0:D)
+    nd2 = D - nd1
+    @assert nd1 ≥ 0 && nd2 ≥ 0 && nd1 + nd2 == D
+    sz1 = sz[1:nd1]
+    sz2 = sz[(nd1 + 1):D]
+    @assert length(sz1) == nd1 && length(sz2) == nd2
+    x = arand(rng, AlgebraicArray{T,nd1}, sz1; maxdepth=maxdepth)
+    y = arand(rng, AlgebraicArray{T,nd2}, sz2; maxdepth=maxdepth)
+    return TensorProductArray{T,D}(x, y)
 end
 
 ################################################################################
@@ -368,6 +418,41 @@ end
 function rassoc(x::ProductArray)
     if x.x isa ProductArray && ndims(x.y) ≥ 2
         return ProductArray(x.x.x, rassoc(ProductArray(x.x.y, x.y)))
+    end
+    return x
+end
+
+function simplify′(x::TensorProductArray)
+    xx = simplify′(x.x)
+    xy = simplify′(x.y)
+    if xx isa ZeroArray || xy isa ZeroArray
+        return ZeroArray{eltype(x),ndims(x)}(size(x))
+    end
+    if ndims(xy) == 0
+        a = xy[]
+        isone(a) && return xx
+        return ScaledArray(a, xx)
+    end
+    if ndims(xx) == 0
+        a = xx[]
+        isone(a) && return xy
+        return ScaledArray(a, xy)
+    end
+    if xx isa ScaledArray && xy isa ScaledArray
+        a = xx.a * xy.a
+        if isone(a)
+            xx = xx.x
+            xy = xy.x
+        else
+            xx = ScaledArray(a, xx.x)
+            xy = xy.x
+        end
+    end
+    return rassoc(TensorProductArray(xx, xy))
+end
+function rassoc(x::TensorProductArray)
+    if x.x isa TensorProductArray
+        return TensorProductArray(x.x.x, rassoc(TensorProductArray(x.x.y, x.y)))
     end
     return x
 end
