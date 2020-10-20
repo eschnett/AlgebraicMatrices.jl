@@ -307,4 +307,42 @@ function arand(rng::AbstractRNG, ::Type{ProductArray{T,D}}, sizes...;
     return ProductArray{T,D}(x, y)
 end
 
+################################################################################
+
+export simplify
+simplify(x::AlgebraicArray) = simplify′(x)
+
+simplify′(x::WrappedArray) = x
+simplify′(x::ZeroArray) = x
+simplify′(x::OneArray) = x
+function simplify′(x::ScaledArray{T,D}) where {T,D}
+    iszero(x.a) && return ZeroArray{T,D}(size(x))
+    xx = simplify′(x.x)
+    xx isa ZeroArray && return xx
+    isone(x.a) && return xx
+    xx isa ScaledArray && return ScaledArray{T,D}(x.a * xx.a, xx.x)
+    return ScaledArray{T,D}(x.a, xx)
+end
+function simplify′(x::SumArray{T,D}) where {T,D}
+    xx = simplify′(x.x)
+    xy = simplify′(x.y)
+    xy isa ZeroArray && return xx
+    xx isa ZeroArray && return xy
+    return lassoc(SumArray{T,D}(xx, xy))
+end
+lassoc(x) = x
+function lassoc(x::SumArray)
+    if x.x isa SumArray
+        return SumArray(x.x.x, lassoc(SumArray(x.x.y, x.y)))
+    end
+    return x
+end
+function simplify′(x::ProductArray{T,D}) where {T,D}
+    xx = simplify′(x.x)
+    xy = simplify′(x.y)
+    xy isa OneArray && return xx
+    xx isa OneArray && return xy
+    return ProductArray{T,D}(xx, xy)
+end
+
 end

@@ -27,9 +27,10 @@ jobs:
           - arch: "x86"
             os: "ubuntu-latest"
             version: "1.5"
-          - arch: "x64"
-            os: "ubuntu-latest"
-            version: "nightly"
+          # Too unstable:
+          # - arch: "x64"
+          #   os: "ubuntu-latest"
+          #   version: "nightly"
     steps:
       - uses: actions/checkout@v2
       - uses: julia-actions/setup-julia@v1
