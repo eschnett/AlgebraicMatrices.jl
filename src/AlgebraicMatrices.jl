@@ -315,34 +315,61 @@ simplify(x::AlgebraicArray) = simplify′(x)
 simplify′(x::WrappedArray) = x
 simplify′(x::ZeroArray) = x
 simplify′(x::OneArray) = x
-function simplify′(x::ScaledArray{T,D}) where {T,D}
-    iszero(x.a) && return ZeroArray{T,D}(size(x))
+
+function simplify′(x::ScaledArray)
+    iszero(x.a) && return ZeroArray{eltype(x),ndims(x)}(size(x))
     xx = simplify′(x.x)
     xx isa ZeroArray && return xx
     isone(x.a) && return xx
-    xx isa ScaledArray && return ScaledArray{T,D}(x.a * xx.a, xx.x)
-    return ScaledArray{T,D}(x.a, xx)
+    xx isa ScaledArray && return ScaledArray(x.a * xx.a, xx.x)
+    return ScaledArray(x.a, xx)
 end
-function simplify′(x::SumArray{T,D}) where {T,D}
+
+function simplify′(x::SumArray)
     xx = simplify′(x.x)
     xy = simplify′(x.y)
     xy isa ZeroArray && return xx
     xx isa ZeroArray && return xy
-    return lassoc(SumArray{T,D}(xx, xy))
+    if xx isa ScaledArray && xy isa ScaledArray && xx.x ≡ xy.x
+        a = xx.a + xy.a
+        iszero(a) && return ZeroArray{eltype(x),ndims(x)}(size(x))
+        isone(a) && return xx.x
+        return ScaledArray(xx.a + xy.a, xx.x)
+    end
+    return rassoc(SumArray(xx, xy))
 end
-lassoc(x) = x
-function lassoc(x::SumArray)
+function rassoc(x::SumArray)
     if x.x isa SumArray
-        return SumArray(x.x.x, lassoc(SumArray(x.x.y, x.y)))
+        return SumArray(x.x.x, rassoc(SumArray(x.x.y, x.y)))
     end
     return x
 end
-function simplify′(x::ProductArray{T,D}) where {T,D}
+
+function simplify′(x::ProductArray)
     xx = simplify′(x.x)
     xy = simplify′(x.y)
+    if xx isa ZeroArray || xy isa ZeroArray
+        return ZeroArray{eltype(x),ndims(x)}(size(x))
+    end
     xy isa OneArray && return xx
     xx isa OneArray && return xy
-    return ProductArray{T,D}(xx, xy)
+    if xx isa ScaledArray && xy isa ScaledArray
+        a = xx.a * xy.a
+        if isone(a)
+            xx = xx.x
+            xy = xy.x
+        else
+            xx = ScaledArray(a, xx.x)
+            xy = xy.x
+        end
+    end
+    return rassoc(ProductArray(xx, xy))
+end
+function rassoc(x::ProductArray)
+    if x.x isa ProductArray && ndims(x.y) ≥ 2
+        return ProductArray(x.x.x, rassoc(ProductArray(x.x.y, x.y)))
+    end
+    return x
 end
 
 end

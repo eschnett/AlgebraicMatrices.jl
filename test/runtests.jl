@@ -76,6 +76,8 @@ end
         @test evaluate(x + y) == evaluate(x) + evaluate(y)
         @test evaluate(a * x) == a * evaluate(x)
         @test evaluate(-x) == -evaluate(x)
+
+        @test simplify(x) == x
     end
     println("\r", " "^40, "\r")
 end
