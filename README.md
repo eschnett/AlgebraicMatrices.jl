@@ -31,6 +31,8 @@ An "algebraic" matrix (or vector, or tensor), i.e. an
 - `ScaledArray`: a scale factor times an `AlgebraicArray`
 - `SumArray`: the sum of two other `AlgebraicArray`s
 - `ProdutArray`: the product of two other `AlgebraicArray`s
+- `TensorSumArray`: the tensor sum of two other `AlgebraicArray`s
+- `TensorProdutArray`: the tensor product of two other `AlgebraicArray`s
 
 Algebraic arrays support the usual array operations. Some of these
 operations might be much cheaper than there standard counterparts
