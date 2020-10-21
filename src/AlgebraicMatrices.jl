@@ -5,7 +5,6 @@ using Random
 
 ################################################################################
 
-# - add tensor product
 # - add matrix inverses
 # - add tensor decompositions (LU, QR)
 # - provide "shell" type (where all operations are provided by functions)
@@ -94,6 +93,9 @@ function arand(rng::AbstractRNG, ::Type{AlgebraicArray{T,D}}, sizes...;
         append!(types,
                 [ScaledArray{T,D}, SumArray{T,D}, ProductArray{T,D},
                  TensorProductArray{T,D}])
+        if D ≥ 1
+            push!(types, TensorSumArray{T,D})
+        end
     end
     return arand(rng, rand(types), sizes...; maxdepth=maxdepth - 1)
 end
@@ -106,10 +108,11 @@ end
 function Base.:(==)(x::AlgebraicArray, y::AlgebraicArray)
     x ≡ y && return true
     size(x) ≠ size(y) && return false
-    @inbounds for i in eachindex(x)
-        x[i] ≠ y[i] && return false
-    end
-    return true
+    # @inbounds for i in eachindex(x)
+    #     x[i] ≠ y[i] && return false
+    # end
+    # return true
+    return evaluate(x) == evaluate(y)
 end
 function Base.:(<)(x::AlgebraicVector, y::AlgebraicVector)
     x ≡ y && return false
@@ -310,6 +313,58 @@ end
 
 ################################################################################
 
+export TensorSumArray
+struct TensorSumArray{T,D} <: AlgebraicArray{T,D}
+    x::AbstractArray{U,D} where {U,D}
+    y::AbstractArray{U,D} where {U,D}
+    function TensorSumArray{T,D}(x::AbstractArray{U,D} where {U},
+                                 y::AbstractArray{V,D} where {V}) where {T,D}
+        D ≥ 1 || error("ndims error")
+        R = typeof(zero(eltype(x)) + zero(eltype(y)))
+        R <: T || error("type mismatch")
+        size(x)[1:(D - 1)] == size(y)[1:(D - 1)] || error("size mismatch")
+        return new{T,D}(x, y)
+    end
+    function TensorSumArray{T}(x::AbstractArray{U,D} where {U},
+                               y::AbstractArray{V,D} where {V}) where {T,D}
+        return TensorSumArray{T,D}(x, y)
+    end
+    function TensorSumArray(x::AbstractArray{U,D} where {U},
+                            y::AbstractArray{V,D} where {V}) where {D}
+        T = typeof(zero(eltype(x)) + zero(eltype(y)))
+        return TensorSumArray{T,D}(x, y)
+    end
+end
+function Base.getindex(x::TensorSumArray{T,D}, inds...) where {T,D}
+    inds = sizes2tuple(Val(D), inds...)
+    sz′ = size(x.x, D)
+    if inds[D] ≤ sz′
+        return x.x[inds...]
+    else
+        return x.y[inds[1:(D - 1)]..., inds[D] - sz′]
+    end
+end
+function Base.size(x::TensorSumArray{T,D}) where {T,D}
+    sz1 = size(x.x)
+    return (sz1[1:(D - 1)]..., size(x.x, D) + size(x.y, D))
+end
+function evaluate(x::TensorSumArray{T,D}) where {T,D}
+    return reshape(vcat(vec(evaluate(x.x)), vec(evaluate(x.y))),
+                   size(x))::AbstractArray{T,D}
+end
+function arand(rng::AbstractRNG, ::Type{TensorSumArray{T,D}}, sizes...;
+               maxdepth=nothing) where {T,D}
+    sz = sizes2tuple(Val(D), sizes...)
+    sz′ = rand(0:sz[D])
+    sz1 = (sz[1:(D - 1)]..., sz′)
+    sz2 = (sz[1:(D - 1)]..., sz[D] - sz′)
+    x = arand(rng, AlgebraicArray{T,D}, sz1; maxdepth=maxdepth)
+    y = arand(rng, AlgebraicArray{T,D}, sz2; maxdepth=maxdepth)
+    return TensorSumArray{T,D}(x, y)
+end
+
+################################################################################
+
 export TensorProductArray
 struct TensorProductArray{T,D} <: AlgebraicArray{T,D}
     x::AbstractArray{U,D} where {U,D}
@@ -416,8 +471,28 @@ function simplify′(x::ProductArray)
     return rassoc(ProductArray(xx, xy))
 end
 function rassoc(x::ProductArray)
-    if x.x isa ProductArray && ndims(x.y) ≥ 2
+    if x.x isa ProductArray && ndims(x.x.y) ≥ 2
         return ProductArray(x.x.x, rassoc(ProductArray(x.x.y, x.y)))
+    end
+    return x
+end
+
+function simplify′(x::TensorSumArray)
+    xx = simplify′(x.x)
+    xy = simplify′(x.y)
+    size(xy, ndims(xy)) == 0 && return xx
+    size(xx, ndims(xx)) == 0 && return xy
+    if xx isa ZeroArray && xy isa ZeroArray
+        return ZeroArray{eltype(x),ndims(x)}(size(x))
+    end
+    if xx isa ScaledArray && xy isa ScaledArray && xx.a == xy.a
+        return ScaledArray(xx.a, TensorSumArray(xx, xy))
+    end
+    return rassoc(TensorSumArray(xx, xy))
+end
+function rassoc(x::TensorSumArray)
+    if x.x isa TensorSumArray
+        return TensorSumArray(x.x.x, rassoc(TensorSumArray(x.x.y, x.y)))
     end
     return x
 end
