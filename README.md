@@ -38,3 +38,7 @@ Algebraic arrays support the usual array operations. Some of these
 operations might be much cheaper than there standard counterparts
 (e.g. matrix products), others might be much more expensive (e.g.
 indexing into a `ProductArray`).
+
+The `evaluate` function converts `AlgebraicArray`s to their standard
+representation. This might be necessary for efficient element-wise
+access.
